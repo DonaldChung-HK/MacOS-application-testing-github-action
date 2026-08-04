@@ -1,0 +1,82 @@
+name: Manual Test Standalone macOS Java App
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_filename:
+        description: 'Name or path of the zip file to test (e.g., app-release-mac.zip)'
+        required: true
+        default: 'app-release.zip'
+        type: string
+
+jobs:
+  test-bundled-app:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Extract Zip Archive
+        run: |
+          ZIP_FILE="${{ inputs.zip_filename }}"
+          
+          if [ ! -f "$ZIP_FILE" ]; then
+            echo "Error: Specified zip file '$ZIP_FILE' does not exist in the repository."
+            exit 1
+          fi
+          
+          echo "Extracting $ZIP_FILE..."
+          unzip -q "$ZIP_FILE" -d extracted/
+
+      - name: Locate Bundle & Ensure Executable Flags
+        run: |
+          APP_PATH=$(find extracted -name "*.app" -maxdepth 2)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: No .app bundle found inside the zip file."
+            exit 1
+          fi
+          
+          echo "APP_PATH=$APP_PATH" >> $GITHUB_ENV
+          
+          # Force execution permissions on the launcher binary inside the bundle
+          chmod +x "$APP_PATH/Contents/MacOS/"*
+          
+          echo "Found app at: $APP_PATH"
+
+      - name: Launch Application GUI (Zero System Java)
+        run: |
+          APP_EXEC="$APP_PATH/Contents/MacOS/"*
+          
+          # Unset system JAVA_HOME to ensure it uses the bundled JDK/JRE
+          unset JAVA_HOME
+          
+          echo "Executing native bundle launcher..."
+          $APP_EXEC &
+          APP_PID=$!
+          
+          # Wait 8 seconds for the JVM to spin up and render the GUI window
+          sleep 8
+          
+          # Check if the app is running
+          if kill -0 $APP_PID 2>/dev/null; then
+            echo "SUCCESS: Application launched without system Java!"
+            
+            # Capture the runner screen to visually inspect the UI
+            screencapture -x app-window-success.png
+            
+            # Cleanly terminate the app process
+            kill -15 $APP_PID || kill -9 $APP_PID
+          else
+            echo "FAILURE: Application crashed on launch."
+            screencapture -x launch-crash.png || true
+            exit 1
+          fi
+
+      - name: Upload Screenshot Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-render-screenshot
+          path: "*.png"
