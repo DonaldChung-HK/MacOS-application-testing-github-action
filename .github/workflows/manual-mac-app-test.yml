@@ -44,6 +44,20 @@ jobs:
           chmod +x "$APP_PATH/Contents/MacOS/"*
           
           echo "Found app at: $APP_PATH"
+      - name: Pre-grant Local Network Privacy Permissions
+        run: |
+          # Extract the Bundle Identifier from Info.plist
+          BUNDLE_ID=$(defaults read "$APP_PATH/Contents/Info.plist" CFBundleIdentifier 2>/dev/null || echo "")
+          echo "Bundle ID: $BUNDLE_ID"
+
+          if [ -n "$BUNDLE_ID" ]; then
+            # Inject permission into the user TCC database
+            TCC_DB="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+            mkdir -p "$(dirname "$TCC_DB")"
+            
+            # Insert access authorization for kTCCServiceLocalNetwork
+            sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access VALUES('kTCCServiceLocalNetwork','$BUNDLE_ID',0,2,4,1,NULL,NULL,0,'UNUSED',NULL,0,$(date +%s));" || true
+          fi
       - name: Launch Application GUI & Accept System Dialogs
         run: |
           APP_EXEC="$APP_PATH/Contents/MacOS/"*
