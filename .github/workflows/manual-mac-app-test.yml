@@ -44,32 +44,55 @@ jobs:
           chmod +x "$APP_PATH/Contents/MacOS/"*
           
           echo "Found app at: $APP_PATH"
-
-      - name: Launch Application GUI (Zero System Java)
+      - name: Launch Application GUI & Accept System Dialogs
         run: |
           APP_EXEC="$APP_PATH/Contents/MacOS/"*
           
-          # Unset system JAVA_HOME to ensure it uses the bundled JDK/JRE
+          # Unset system JAVA_HOME to rely solely on the bundled JRE
           unset JAVA_HOME
           
           echo "Executing native bundle launcher..."
           $APP_EXEC &
           APP_PID=$!
           
-          # Wait 8 seconds for the JVM to spin up and render the GUI window
-          sleep 8
+          # Give the app and the system dialog 3 seconds to appear
+          sleep 3
           
-          # Check if the app is running
+          # Trigger AppleScript to find and click "Allow" (or press Enter)
+          echo "Attempting to auto-accept macOS permission prompt..."
+          osascript -e '
+            tell application "System Events"
+              -- Wait up to 5 seconds for any modal dialog/button to appear
+              repeat 5 times
+                try
+                  -- Attempt 1: Click "Allow" button if present
+                  if exists (button "Allow" of window 1 of process "System Events") then
+                    click button "Allow" of window 1 of process "System Events"
+                    exit repeat
+                  end if
+                on error
+                  -- Fallback: Press Enter/Return to accept the default action
+                  key code 36
+                end try
+                delay 1
+              end repeat
+            end tell
+          ' || true
+
+          # Give the application another 5 seconds to load past the prompt
+          sleep 5
+          
+          # Verify the application process is still active
           if kill -0 $APP_PID 2>/dev/null; then
-            echo "SUCCESS: Application launched without system Java!"
+            echo "SUCCESS: Application moved past prompt and is running!"
             
-            # Capture the runner screen to visually inspect the UI
+            # Capture the updated app UI screen
             screencapture -x app-window-success.png
             
-            # Cleanly terminate the app process
+            # Clean up app process
             kill -15 $APP_PID || kill -9 $APP_PID
           else
-            echo "FAILURE: Application crashed on launch."
+            echo "FAILURE: Application crashed after handling prompt."
             screencapture -x launch-crash.png || true
             exit 1
           fi
